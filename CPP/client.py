@@ -1,1 +1,0 @@
-self.socket.s.send(b'1')

@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from .socket_wrapper import socket_p
 from .read_yaml import read_yaml
 import pickle
+import struct
 
 class client():
 
@@ -19,6 +20,7 @@ class client():
 		# host = self.config['ip']
 		port = self.config['port']
 		host = '127.0.0.1'
+		self.buffer_size = 10000
 		# port = 5000
 		self.socket = socket_p(port=port,host=host)
 		self.live_update_initial()
@@ -30,9 +32,9 @@ class client():
 		self.ax1 = self.fig.add_subplot(1, 1, 1)
 
 		self.fig.canvas.draw()   # note that the first draw comes before setting data 
-		x = np.linspace(0,50., num=1000)
+		x = np.linspace(0,50., num=self.buffer_size)
 		self.h1, = self.ax1.plot(x, lw=3)
-		self.ax1.set_ylim([-1,1])
+		self.ax1.set_ylim([-20,20])
 
 		if self.blit:
 			self.ax1background = self.fig.canvas.copy_from_bbox(self.ax1.bbox)
@@ -55,20 +57,28 @@ class client():
 
 		plt.pause(0.000000000001)
 
+	def flo(self, val_4):
+		pass
+
+
+	def convert(self, values):
+		double_values = []
+		for i in range(self.buffer_size):
+			double_values.append(struct.unpack('>f', values[4*i:4*(i+1)])[0])
+
+		return double_values
+
 	def run(self):		
 
-		self.socket.s.send(b'starting')
-		print('Sent : asdf asdf asdf')
-		values = self.socket.s.recv(4000)
-		print('Got : ', str(values))
-		values = self.socket.s.recv(4000)
-		print('Got : ', str(values))
-		exit(0)
+		import time
 
+		self.socket.s.send(b'starting')
 		while True:
 			values = b''
-			while values == b'':
-				values = self.socket.s.recv(4000000)
-			values = pickle.loads(values)
 			self.socket.s.send(b'1')
+			while True:
+				values += self.socket.s.recv(400000000)
+				if len(values)==4*self.buffer_size:
+					break
+			values = self.convert(values)
 			self.update_now(values)
