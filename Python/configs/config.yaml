@@ -1,0 +1,11 @@
+show_points: 1000
+port: 8080
+ip: '10.8.100.146'
+blit: True
+buffer_size: 100000 # 10^7 sampling rate and storing signal for 1 second
+trigger:
+  edge: rising
+  mode: normal
+
+dir:
+  experiment_dir: ./Exp
