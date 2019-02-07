@@ -19,15 +19,27 @@
 
 float scale = 10;
 float shift = 5;
-float trigger = 4;
+float trigger = 8;
 float current;
 
 int starting_port = 5;
 int cycle_count = 0;
 uint dummy_gpio_high = 0x7fe0;
 uint dummy_gpio_low = 0;
-bool square_wave = true;
+
 float prev_value = 0;
+// Specific For square wave **************************
+	int count = 0;
+	bool square_wave = true;
+// Specific For square wave **************************
+
+char trigger_function = 'r', trigger_mode = 'a';
+
+// Net efficiency code ********************************
+
+
+
+// Net efficiency code ********************************
 
 union number {
     float d;
@@ -35,13 +47,29 @@ union number {
 };
 
 number buffer_[BUFFER_SIZE];
+number continuous_[BUFFER_SIZE];
 
 char to_send[BUFFER_SIZE*4];
+char to_send_continuous[BUFFER_SIZE*4];
 
 using namespace std;
 
 uint gpioRead_Bits_0_31()
 {
+	// Specific For square wave **************************
+		count += 1;
+		if (count%2600 == 1300)
+		{
+			square_wave = false;
+		}
+		else if(count%2600 == 0)
+		{
+			square_wave = true;
+			count = 0;
+			// cout<<endl<<endl;
+		}
+
+	// Specific For square wave **************************
 	if (square_wave)
 		return dummy_gpio_high;
 	else
@@ -54,9 +82,25 @@ float read_process_GPIO()
 	return current*scale - shift;
 }
 
-bool trigger_f(float &current_value)
+// Rising edge triggered trigger function
+bool trigger_f_re(float &current_value)
 {
 	if(prev_value < trigger && current_value > trigger)
+	{
+		prev_value = current_value;
+		return true;
+	}
+	else
+	{
+		prev_value = current_value;
+		return false;
+	}
+}
+
+// Falling edge triggered trigger function
+bool trigger_f_fe(float &current_value)
+{
+	if(prev_value > trigger && current_value < trigger)
 	{
 		prev_value = current_value;
 		return true;
@@ -80,6 +124,19 @@ void send_data(int new_socket)
 	}
 	// cout<<(int)to_send[0]<<" "<<(int)to_send[1]<<" "<<(int)to_send[2]<<" "<<(int)to_send[3]<<" "<<buffer_[0].i<<" "<<buffer_[0].d<<endl;
 	send(new_socket , to_send , 4*BUFFER_SIZE , 0 );
+}
+
+void send_data_automatic(int new_socket)
+{
+	for(int i=0;i<BUFFER_SIZE;++i)
+	{
+		to_send_continuous[4*i] = (continuous_[i].i>>24)%256;
+		to_send_continuous[4*i+1] = (continuous_[i].i>>16)%256;
+		to_send_continuous[4*i+2] = (continuous_[i].i>>8)%256;
+		to_send_continuous[4*i+3] = (continuous_[i].i)%256;
+	}
+	// cout<<(int)to_send[0]<<" "<<(int)to_send[1]<<" "<<(int)to_send[2]<<" "<<(int)to_send[3]<<" "<<buffer_[0].i<<" "<<buffer_[0].d<<endl;
+	send(new_socket , to_send_continuous , 4*BUFFER_SIZE , 0 );
 }
 
 void display_data()
@@ -148,42 +205,83 @@ int main(int argc, char const *argv[])
 			break;
 		} 
 	}
+	send(new_socket , "started" , strlen("started") , 0 );
 	clock_t t, curr_time;
 
-	// Specific For square wave **************************
-	int count = 0;
-	// Specific For square wave **************************
 	prev_value = read_process_GPIO();
 	float value;
 	bool start_storing = false, displaying_wait=false;
 	int point = 0;
 	t = clock();
+
+	// For Triggering Modes ******************************
+	clock_t periodic_check;
+	periodic_check = clock();
+
+	// For Triggering Modes ******************************
+
+	int count_signal = 0;
 	
 
 	while(true)
 	{
 		value = read_process_GPIO();
-		if(trigger_f(value) &&!start_storing &&!displaying_wait)
+		continuous_[count_signal].d = value;
+		++count_signal;
+		if(count_signal%BUFFER_SIZE == 0)
 		{
-			start_storing = true;
-			point = 0;
+			count_signal = 0;
 		}
 
-		// Specific For square wave **************************
-		count += 1;
-		if (count%2600 == 1300)
-			square_wave = false;
-		else if(count%2600 == 0)
-			square_wave = true;
+		if(trigger_function == 'r')
+		{
+			if(trigger_f_re(value) &&!start_storing &&!displaying_wait)
+			{
+				start_storing = true;
+				point = 0;
+				periodic_check = clock();
+			}
+		}
+		else if(trigger_function == 'f')
+		{
+			if(trigger_f_fe(value) &&!start_storing &&!displaying_wait)
+			{
+				start_storing = true;
+				point = 0;
+				periodic_check = clock();
+			}
+		}
 
-		// Specific For square wave **************************
+		if(((float)(clock() - periodic_check))/CLOCKS_PER_SEC > 0.1)
+		{
+			for(int i=0;i<BUFFER_SIZE;++i)
+			{
+				value = read_process_GPIO();
+				continuous_[i].d = value;
+			}
+			if(trigger_mode=='n')
+			{
+				valread = read( new_socket , buffer, 1024);
+				if(valread == 1)
+					send_data(new_socket);
+				else
+					cout<<"Some error"<<valread<<endl;
+			}
+			else if(trigger_mode=='a')
+			{
+				valread = read( new_socket , buffer, 1024);
+				if(valread == 1)
+					send_data_automatic(new_socket);
+				else
+					cout<<"Some error"<<valread<<endl;
+			}
+			periodic_check = clock();
+		}
 		
 		if (start_storing)
 		{
 			if(point == BUFFER_SIZE)
 			{
-				// if(1084227584!=buffer_[1000].i)
-				// 	cout<<buffer_[1000].i<<endl;
 				// Logic for displaying the values
 				displaying_wait = true;
 				curr_time = clock() - t;
@@ -191,7 +289,6 @@ int main(int argc, char const *argv[])
 				{
 					displaying_wait = false;
 					start_storing = false;
-					// display_data();
 					valread = read( new_socket , buffer, 1024);
 					if(valread == 1)
 						send_data(new_socket);
@@ -208,8 +305,5 @@ int main(int argc, char const *argv[])
 			}
 		}
 	}
-	
-	// send(new_socket , to_send , strlen(to_send) , 0 ); 
-	// printf("Hello message sent\n"); 
 	return 0; 
-} 
+}

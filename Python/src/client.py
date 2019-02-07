@@ -74,6 +74,10 @@ class client():
 
 		self.socket.s.send(b'starting')
 		while True:
+			if self.socket.s.recv(4000) == b'started':
+				break
+		while True:
+			# print('Here')
 			values = b''
 			self.socket.s.send(b'1')
 			while True:
