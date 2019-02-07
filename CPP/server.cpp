@@ -16,6 +16,7 @@
 #define PORT 8080 
 
 #define BUFFER_SIZE 10000
+long long int read_speed_values_s;
 
 float scale = 10;
 float shift = 5;
@@ -28,12 +29,24 @@ uint dummy_gpio_high = 0x7fe0;
 uint dummy_gpio_low = 0;
 
 float prev_value = 0;
+float value;
 // Specific For square wave **************************
 	int count = 0;
 	bool square_wave = true;
 // Specific For square wave **************************
 
 char trigger_function = 'r', trigger_mode = 'a';
+bool start_storing = false, displaying_wait=false;
+int point = 0;
+int count_signal = 0;
+double calculate_speed = 0;
+clock_t t, curr_time, periodic_check, calculate_speed_clock;
+
+int server_fd, new_socket, valread; 
+struct sockaddr_in address; 
+int opt = 1; 
+int addrlen = sizeof(address); 
+char buffer[1024] = {0}; 
 
 // Net efficiency code ********************************
 
@@ -66,7 +79,6 @@ uint gpioRead_Bits_0_31()
 		{
 			square_wave = true;
 			count = 0;
-			// cout<<endl<<endl;
 		}
 
 	// Specific For square wave **************************
@@ -148,14 +160,85 @@ void display_data()
 	cout<<endl<<cycle_count<<endl<<endl<<endl;
 }
 
+void main_f()
+{
+	value = read_process_GPIO();
+	continuous_[count_signal].d = value;
+	++count_signal;
+	if(count_signal%BUFFER_SIZE == 0)
+	{
+		count_signal = 0;
+	}
+
+	if(trigger_function == 'r')
+	{
+		if(trigger_f_re(value) &&!start_storing &&!displaying_wait)
+		{
+			start_storing = true;
+			periodic_check = clock();
+		}
+	}
+	else if(trigger_function == 'f')
+	{
+		if(trigger_f_fe(value) &&!start_storing &&!displaying_wait)
+		{
+			start_storing = true;
+			periodic_check = clock();
+		}
+	}
+
+	if(((float)(clock() - periodic_check))/CLOCKS_PER_SEC > 0.1)
+	{
+		for(int i=0;i<BUFFER_SIZE;++i)
+		{
+			value = read_process_GPIO();
+			continuous_[i].d = value;
+		}
+		if(trigger_mode=='n')
+		{
+			valread = read( new_socket , buffer, 1024);
+			if(valread == 1)
+				send_data(new_socket);
+			else
+				cout<<"Some error"<<valread<<endl;
+		}
+		else if(trigger_mode=='a')
+		{
+			valread = read( new_socket , buffer, 1024);
+			if(valread == 1)
+				send_data_automatic(new_socket);
+			else
+				cout<<"Some error"<<valread<<endl;
+		}
+		periodic_check = clock();
+	}
+	
+	if (start_storing)
+	{
+		for(int point=0;point<BUFFER_SIZE;++point)
+		{
+			buffer_[point].d = value;
+		}
+		// Logic for displaying the values
+		displaying_wait = true;
+		curr_time = clock() - t;
+		if(((float)curr_time)/CLOCKS_PER_SEC > 0.00625)
+		{
+			displaying_wait = false;
+			start_storing = false;
+			valread = read( new_socket , buffer, 1024);
+			if(valread == 1)
+				send_data(new_socket);
+			else
+				cout<<"Some error"<<valread<<endl;
+			cycle_count++;
+			t = clock();
+		}
+	}
+}
+
 int main(int argc, char const *argv[]) 
 { 
-	int server_fd, new_socket, valread; 
-	struct sockaddr_in address; 
-	int opt = 1; 
-	int addrlen = sizeof(address); 
-	char buffer[1024] = {0}; 
-	
 	// Creating socket file descriptor 
 	if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) 
 	{ 
@@ -206,103 +289,37 @@ int main(int argc, char const *argv[])
 		} 
 	}
 	send(new_socket , "started" , strlen("started") , 0 );
-	clock_t t, curr_time;
-
+	
 	prev_value = read_process_GPIO();
-	float value;
-	bool start_storing = false, displaying_wait=false;
-	int point = 0;
 	t = clock();
 
 	// For Triggering Modes ******************************
-	clock_t periodic_check;
 	periodic_check = clock();
 
 	// For Triggering Modes ******************************
 
-	int count_signal = 0;
+		
+	// for(int i=0;i<BUFFER_SIZE;++i)
+	// {
+	// 	main_f();
+	// }
 	
+
+	calculate_speed_clock = clock();
+	long long int speed_count = 0;
 
 	while(true)
 	{
-		value = read_process_GPIO();
-		continuous_[count_signal].d = value;
-		++count_signal;
-		if(count_signal%BUFFER_SIZE == 0)
-		{
-			count_signal = 0;
-		}
+		main_f();
+		// value = read_process_GPIO();
 
-		if(trigger_function == 'r')
+		++speed_count;
+		if(speed_count%(100*BUFFER_SIZE) == 0)
 		{
-			if(trigger_f_re(value) &&!start_storing &&!displaying_wait)
-			{
-				start_storing = true;
-				point = 0;
-				periodic_check = clock();
-			}
-		}
-		else if(trigger_function == 'f')
-		{
-			if(trigger_f_fe(value) &&!start_storing &&!displaying_wait)
-			{
-				start_storing = true;
-				point = 0;
-				periodic_check = clock();
-			}
-		}
-
-		if(((float)(clock() - periodic_check))/CLOCKS_PER_SEC > 0.1)
-		{
-			for(int i=0;i<BUFFER_SIZE;++i)
-			{
-				value = read_process_GPIO();
-				continuous_[i].d = value;
-			}
-			if(trigger_mode=='n')
-			{
-				valread = read( new_socket , buffer, 1024);
-				if(valread == 1)
-					send_data(new_socket);
-				else
-					cout<<"Some error"<<valread<<endl;
-			}
-			else if(trigger_mode=='a')
-			{
-				valread = read( new_socket , buffer, 1024);
-				if(valread == 1)
-					send_data_automatic(new_socket);
-				else
-					cout<<"Some error"<<valread<<endl;
-			}
-			periodic_check = clock();
-		}
-		
-		if (start_storing)
-		{
-			if(point == BUFFER_SIZE)
-			{
-				// Logic for displaying the values
-				displaying_wait = true;
-				curr_time = clock() - t;
-				if(((float)curr_time)/CLOCKS_PER_SEC > 0.00625)
-				{
-					displaying_wait = false;
-					start_storing = false;
-					valread = read( new_socket , buffer, 1024);
-					if(valread == 1)
-						send_data(new_socket);
-					else
-						cout<<"Some error"<<valread<<endl;
-					cycle_count++;
-					t = clock();
-				}
-			}
-			else
-			{
-				buffer_[point].d = value;
-				++point;
-			}
+			speed_count = 0;
+			calculate_speed = clock() - calculate_speed_clock;
+			read_speed_values_s = (long long int)(100*BUFFER_SIZE/(((double)calculate_speed)/CLOCKS_PER_SEC));
+			calculate_speed_clock = clock();
 		}
 	}
 	return 0; 
